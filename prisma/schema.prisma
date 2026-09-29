@@ -1,0 +1,280 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum SpaceRole {
+  OWNER
+  MEMBER
+}
+
+enum AccountType {
+  CHECKING
+  SAVINGS
+  CASH
+  INVESTMENT
+  OTHER
+}
+
+enum AccountOwnership {
+  INDIVIDUAL
+  SHARED
+}
+
+enum CategoryType {
+  INCOME
+  EXPENSE
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+}
+
+enum TransactionStatus {
+  PENDING
+  PAID
+}
+
+enum SplitMethod {
+  INDIVIDUAL
+  EQUAL
+  PERCENTAGE
+  CUSTOM
+  INCOME_BASED
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String   @db.VarChar(100)
+  email        String   @unique @db.VarChar(254)
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  createdSpaces       FinancialSpace[]       @relation("SpaceCreator")
+  memberships         SpaceMember[]
+  sessions            Session[]
+  createdAccounts     Account[]              @relation("AccountCreator")
+  createdCategories   Category[]             @relation("CategoryCreator")
+  createdTransactions FinancialTransaction[] @relation("TransactionCreator")
+  createdTransfers    AccountTransfer[]      @relation("TransferCreator")
+  createdInvitations  SpaceInvitation[]      @relation("InvitationCreator")
+  acceptedInvitations SpaceInvitation[]      @relation("InvitationAccepter")
+
+  @@map("users")
+}
+
+model FinancialSpace {
+  id          String    @id @default(uuid()) @db.Uuid
+  name        String    @db.VarChar(100)
+  currency    String    @default("BRL") @db.Char(3)
+  timezone    String    @default("America/Sao_Paulo") @db.VarChar(64)
+  createdById String    @map("created_by") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  creator           User                   @relation("SpaceCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  members           SpaceMember[]
+  sessions          Session[]              @relation("ActiveFinancialSpace")
+  accounts          Account[]
+  categories        Category[]
+  transactions      FinancialTransaction[]
+  transactionSplits TransactionSplit[]
+  transfers         AccountTransfer[]
+  invitations       SpaceInvitation[]
+
+  @@index([createdById])
+  @@index([deletedAt])
+  @@map("financial_spaces")
+}
+
+model SpaceMember {
+  id               String    @id @default(uuid()) @db.Uuid
+  financialSpaceId String    @map("financial_space_id") @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  role             SpaceRole @default(MEMBER)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  revokedAt        DateTime? @map("revoked_at") @db.Timestamptz(3)
+
+  financialSpace    FinancialSpace         @relation(fields: [financialSpaceId], references: [id], onDelete: Cascade)
+  user              User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  heldAccounts      Account[]              @relation("AccountHolder")
+  paidTransactions  FinancialTransaction[] @relation("TransactionPayer")
+  transactionSplits TransactionSplit[]
+
+  @@unique([financialSpaceId, userId])
+  @@index([userId, revokedAt])
+  @@map("space_members")
+}
+
+model Session {
+  id                     String   @id @default(uuid()) @db.Uuid
+  tokenHash              String   @unique @map("token_hash") @db.Char(64)
+  userId                 String   @map("user_id") @db.Uuid
+  activeFinancialSpaceId String?  @map("active_financial_space_id") @db.Uuid
+  expiresAt              DateTime @map("expires_at") @db.Timestamptz(3)
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastSeenAt             DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+
+  user                 User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activeFinancialSpace FinancialSpace? @relation("ActiveFinancialSpace", fields: [activeFinancialSpaceId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model SpaceInvitation {
+  id               String    @id @default(uuid()) @db.Uuid
+  financialSpaceId String    @map("financial_space_id") @db.Uuid
+  email            String    @db.VarChar(254)
+  role             SpaceRole @default(MEMBER)
+  tokenHash        String    @unique @map("token_hash") @db.Char(64)
+  expiresAt        DateTime  @map("expires_at") @db.Timestamptz(3)
+  acceptedAt       DateTime? @map("accepted_at") @db.Timestamptz(3)
+  acceptedById     String?   @map("accepted_by") @db.Uuid
+  revokedAt        DateTime? @map("revoked_at") @db.Timestamptz(3)
+  createdById      String    @map("created_by") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  financialSpace FinancialSpace @relation(fields: [financialSpaceId], references: [id], onDelete: Cascade)
+  creator        User           @relation("InvitationCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  acceptedBy     User?          @relation("InvitationAccepter", fields: [acceptedById], references: [id], onDelete: Restrict)
+
+  @@index([financialSpaceId, email])
+  @@index([expiresAt])
+  @@map("space_invitations")
+}
+
+model Account {
+  id               String           @id @default(uuid()) @db.Uuid
+  financialSpaceId String           @map("financial_space_id") @db.Uuid
+  name             String           @db.VarChar(100)
+  type             AccountType
+  ownership        AccountOwnership @default(INDIVIDUAL)
+  holderMemberId   String?          @map("holder_member_id") @db.Uuid
+  openingBalance   Decimal          @default(0) @map("opening_balance") @db.Decimal(19, 4)
+  currency         String           @default("BRL") @db.Char(3)
+  createdById      String           @map("created_by") @db.Uuid
+  createdAt        DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt        DateTime?        @map("deleted_at") @db.Timestamptz(3)
+
+  financialSpace    FinancialSpace         @relation(fields: [financialSpaceId], references: [id], onDelete: Cascade)
+  holderMember      SpaceMember?           @relation("AccountHolder", fields: [holderMemberId], references: [id], onDelete: Restrict)
+  creator           User                   @relation("AccountCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  transactions      FinancialTransaction[]
+  outgoingTransfers AccountTransfer[]      @relation("TransferSource")
+  incomingTransfers AccountTransfer[]      @relation("TransferDestination")
+
+  @@unique([id, financialSpaceId], map: "accounts_id_financial_space_id_key")
+  @@index([financialSpaceId, deletedAt])
+  @@index([holderMemberId])
+  @@map("accounts")
+}
+
+model Category {
+  id               String       @id @default(uuid()) @db.Uuid
+  financialSpaceId String       @map("financial_space_id") @db.Uuid
+  name             String       @db.VarChar(80)
+  type             CategoryType
+  color            String?      @db.VarChar(7)
+  createdById      String       @map("created_by") @db.Uuid
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt        DateTime?    @map("deleted_at") @db.Timestamptz(3)
+
+  financialSpace FinancialSpace         @relation(fields: [financialSpaceId], references: [id], onDelete: Cascade)
+  creator        User                   @relation("CategoryCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  transactions   FinancialTransaction[]
+
+  @@unique([financialSpaceId, type, name])
+  @@index([financialSpaceId, deletedAt])
+  @@map("categories")
+}
+
+model FinancialTransaction {
+  id               String            @id @default(uuid()) @db.Uuid
+  financialSpaceId String            @map("financial_space_id") @db.Uuid
+  accountId        String            @map("account_id") @db.Uuid
+  categoryId       String            @map("category_id") @db.Uuid
+  payerMemberId    String?           @map("payer_member_id") @db.Uuid
+  createdById      String            @map("created_by") @db.Uuid
+  type             TransactionType
+  status           TransactionStatus @default(PAID)
+  splitMethod      SplitMethod       @default(INDIVIDUAL) @map("split_method")
+  description      String            @db.VarChar(160)
+  amount           Decimal           @db.Decimal(19, 4)
+  competenceDate   DateTime          @map("competence_date") @db.Date
+  dueDate          DateTime?         @map("due_date") @db.Date
+  paidAt           DateTime?         @map("paid_at") @db.Timestamptz(3)
+  notes            String?           @db.VarChar(500)
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt        DateTime?         @map("deleted_at") @db.Timestamptz(3)
+
+  financialSpace FinancialSpace     @relation(fields: [financialSpaceId], references: [id], onDelete: Cascade)
+  account        Account            @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  category       Category           @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  payerMember    SpaceMember?       @relation("TransactionPayer", fields: [payerMemberId], references: [id], onDelete: Restrict)
+  creator        User               @relation("TransactionCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  splits         TransactionSplit[]
+
+  @@index([financialSpaceId, competenceDate])
+  @@index([financialSpaceId, status, dueDate])
+  @@index([accountId, competenceDate])
+  @@index([categoryId])
+  @@map("financial_transactions")
+}
+
+model TransactionSplit {
+  id               String   @id @default(uuid()) @db.Uuid
+  financialSpaceId String   @map("financial_space_id") @db.Uuid
+  transactionId    String   @map("transaction_id") @db.Uuid
+  memberId         String   @map("member_id") @db.Uuid
+  amount           Decimal  @db.Decimal(19, 4)
+  percentage       Decimal? @db.Decimal(7, 4)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  financialSpace FinancialSpace       @relation(fields: [financialSpaceId], references: [id], onDelete: Cascade)
+  transaction    FinancialTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  member         SpaceMember          @relation(fields: [memberId], references: [id], onDelete: Restrict)
+
+  @@unique([transactionId, memberId])
+  @@index([financialSpaceId, memberId])
+  @@map("transaction_splits")
+}
+
+model AccountTransfer {
+  id                   String    @id @default(uuid()) @db.Uuid
+  financialSpaceId     String    @map("financial_space_id") @db.Uuid
+  sourceAccountId      String    @map("source_account_id") @db.Uuid
+  destinationAccountId String    @map("destination_account_id") @db.Uuid
+  createdById          String    @map("created_by") @db.Uuid
+  amount               Decimal   @db.Decimal(19, 4)
+  transferDate         DateTime  @map("transfer_date") @db.Date
+  description          String?   @db.VarChar(160)
+  notes                String?   @db.VarChar(500)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt            DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  financialSpace     FinancialSpace @relation(fields: [financialSpaceId], references: [id], onDelete: Cascade)
+  sourceAccount      Account        @relation("TransferSource", fields: [sourceAccountId, financialSpaceId], references: [id, financialSpaceId], onDelete: Restrict, map: "account_transfers_source_account_space_fkey")
+  destinationAccount Account        @relation("TransferDestination", fields: [destinationAccountId, financialSpaceId], references: [id, financialSpaceId], onDelete: Restrict, map: "account_transfers_destination_account_space_fkey")
+  creator            User           @relation("TransferCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([financialSpaceId, transferDate])
+  @@index([sourceAccountId, transferDate])
+  @@index([destinationAccountId, transferDate])
+  @@map("account_transfers")
+}
