@@ -13,6 +13,7 @@ const typeLabels = {
   SAVINGS: "Poupança",
   CASH: "Dinheiro",
   INVESTMENT: "Investimentos",
+  CREDIT_CARD: "Cartão de crédito",
   OTHER: "Outra",
 } as const;
 

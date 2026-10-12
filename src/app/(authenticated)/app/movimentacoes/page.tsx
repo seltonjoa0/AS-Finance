@@ -1,5 +1,13 @@
 import type { Metadata } from "next";
-import { ArrowDownRight, ArrowRightLeft, ArrowUpRight, Plus, ReceiptText } from "lucide-react";
+import {
+  ArrowDownRight,
+  ArrowRightLeft,
+  ArrowUpRight,
+  CreditCard,
+  Plus,
+  ReceiptText,
+  Repeat2,
+} from "lucide-react";
 import Link from "next/link";
 
 import { formatAccountLabel } from "@/features/finance/accounts";
@@ -139,7 +147,9 @@ export default async function TransactionsPage({
                             {transfer.description || "Transferência entre contas"}
                           </p>
                           <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-extrabold text-blue-700">
-                            Transferida
+                            {transfer.creditCardInvoiceId
+                              ? "Pagamento de fatura"
+                              : "Transferida"}
                           </span>
                         </div>
                         <p className="mt-1 text-xs leading-5 text-muted">
@@ -174,8 +184,26 @@ export default async function TransactionsPage({
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="truncate text-sm font-bold text-ink">{transaction.description}</p>
                         <span className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold ${transaction.status === "PAID" ? "bg-brand-100 text-brand-800" : "bg-amber-50 text-amber-700"}`}>
-                          {transaction.status === "PAID" ? (income ? "Recebida" : "Paga") : "Pendente"}
+                          {transaction.status === "PAID"
+                            ? income
+                              ? "Recebida"
+                              : transaction.creditCardInvoiceId
+                                ? "Lançada"
+                                : "Paga"
+                            : "Pendente"}
                         </span>
+                        {transaction.recurringRuleId && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-extrabold text-blue-700">
+                            <Repeat2 className="size-3" aria-hidden="true" />
+                            Recorrente
+                          </span>
+                        )}
+                        {transaction.creditCardInvoiceId && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-extrabold text-violet-700">
+                            <CreditCard className="size-3" aria-hidden="true" />
+                            Cartão
+                          </span>
+                        )}
                       </div>
                       <p className="mt-1 truncate text-xs text-muted">
                         {transaction.category.name} · {transaction.account.name} · {formatCivilDate(transaction.competenceDate)}

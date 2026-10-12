@@ -18,6 +18,7 @@ enum AccountType {
   SAVINGS
   CASH
   INVESTMENT
+  CREDIT_CARD
   OTHER
 }
 
@@ -49,6 +50,22 @@ enum SplitMethod {
   INCOME_BASED
 }
 
+enum RecurrenceFrequency {
+  MONTHLY
+}
+
+enum RecurringRuleState {
+  ACTIVE
+  PAUSED
+  ENDED
+}
+
+enum CreditCardInvoiceStatus {
+  OPEN
+  CLOSED
+  PAID
+}
+
 model User {
   id           String   @id @default(uuid()) @db.Uuid
   name         String   @db.VarChar(100)
@@ -57,16 +74,18 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  createdSpaces        FinancialSpace[]       @relation("SpaceCreator")
-  memberships          SpaceMember[]
-  sessions             Session[]
-  createdAccounts      Account[]              @relation("AccountCreator")
-  createdCategories    Category[]             @relation("CategoryCreator")
-  createdTransactions  FinancialTransaction[] @relation("TransactionCreator")
-  createdTransfers     AccountTransfer[]      @relation("TransferCreator")
-  createdMemberIncomes MemberIncome[]         @relation("MemberIncomeCreator")
-  createdInvitations   SpaceInvitation[]      @relation("InvitationCreator")
-  acceptedInvitations  SpaceInvitation[]      @relation("InvitationAccepter")
+  createdSpaces         FinancialSpace[]       @relation("SpaceCreator")
+  memberships           SpaceMember[]
+  sessions              Session[]
+  createdAccounts       Account[]              @relation("AccountCreator")
+  createdCategories     Category[]             @relation("CategoryCreator")
+  createdTransactions   FinancialTransaction[] @relation("TransactionCreator")
+  createdRecurringRules RecurringRule[]        @relation("RecurringRuleCreator")
+  createdCreditCards    CreditCard[]           @relation("CreditCardCreator")
+  createdTransfers      AccountTransfer[]      @relation("TransferCreator")
+  createdMemberIncomes  MemberIncome[]         @relation("MemberIncomeCreator")
+  createdInvitations    SpaceInvitation[]      @relation("InvitationCreator")
+  acceptedInvitations   SpaceInvitation[]      @relation("InvitationAccepter")
 
   @@map("users")
 }
@@ -81,16 +100,20 @@ model FinancialSpace {
   updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
   deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(3)
 
-  creator           User                   @relation("SpaceCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  members           SpaceMember[]
-  sessions          Session[]              @relation("ActiveFinancialSpace")
-  accounts          Account[]
-  categories        Category[]
-  transactions      FinancialTransaction[]
-  transactionSplits TransactionSplit[]
-  transfers         AccountTransfer[]
-  memberIncomes     MemberIncome[]
-  invitations       SpaceInvitation[]
+  creator             User                   @relation("SpaceCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  members             SpaceMember[]
+  sessions            Session[]              @relation("ActiveFinancialSpace")
+  accounts            Account[]
+  categories          Category[]
+  transactions        FinancialTransaction[]
+  transactionSplits   TransactionSplit[]
+  recurringRules      RecurringRule[]
+  recurringRuleSplits RecurringRuleSplit[]
+  creditCards         CreditCard[]
+  creditCardInvoices  CreditCardInvoice[]
+  transfers           AccountTransfer[]
+  memberIncomes       MemberIncome[]
+  invitations         SpaceInvitation[]
 
   @@index([createdById])
   @@index([deletedAt])
@@ -106,12 +129,14 @@ model SpaceMember {
   updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
   revokedAt        DateTime? @map("revoked_at") @db.Timestamptz(3)
 
-  financialSpace    FinancialSpace         @relation(fields: [financialSpaceId], references: [id], onDelete: Cascade)
-  user              User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  heldAccounts      Account[]              @relation("AccountHolder")
-  paidTransactions  FinancialTransaction[] @relation("TransactionPayer")
-  transactionSplits TransactionSplit[]
-  incomeHistory     MemberIncome[]
+  financialSpace      FinancialSpace         @relation(fields: [financialSpaceId], references: [id], onDelete: Cascade)
+  user                User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  heldAccounts        Account[]              @relation("AccountHolder")
+  paidTransactions    FinancialTransaction[] @relation("TransactionPayer")
+  transactionSplits   TransactionSplit[]
+  paidRecurringRules  RecurringRule[]        @relation("RecurringRulePayer")
+  recurringRuleSplits RecurringRuleSplit[]
+  incomeHistory       MemberIncome[]
 
   @@unique([financialSpaceId, userId])
   @@unique([id, financialSpaceId], map: "space_members_id_financial_space_id_key")
@@ -196,6 +221,8 @@ model Account {
   holderMember      SpaceMember?           @relation("AccountHolder", fields: [holderMemberId], references: [id], onDelete: Restrict)
   creator           User                   @relation("AccountCreator", fields: [createdById], references: [id], onDelete: Restrict)
   transactions      FinancialTransaction[]
+  recurringRules    RecurringRule[]
+  creditCard        CreditCard?
   outgoingTransfers AccountTransfer[]      @relation("TransferSource")
   incomingTransfers AccountTransfer[]      @relation("TransferDestination")
 
@@ -219,41 +246,51 @@ model Category {
   financialSpace FinancialSpace         @relation(fields: [financialSpaceId], references: [id], onDelete: Cascade)
   creator        User                   @relation("CategoryCreator", fields: [createdById], references: [id], onDelete: Restrict)
   transactions   FinancialTransaction[]
+  recurringRules RecurringRule[]
 
+  @@unique([id, financialSpaceId], map: "categories_id_financial_space_id_key")
   @@unique([financialSpaceId, type, name])
   @@index([financialSpaceId, deletedAt])
   @@map("categories")
 }
 
 model FinancialTransaction {
-  id               String            @id @default(uuid()) @db.Uuid
-  financialSpaceId String            @map("financial_space_id") @db.Uuid
-  accountId        String            @map("account_id") @db.Uuid
-  categoryId       String            @map("category_id") @db.Uuid
-  payerMemberId    String?           @map("payer_member_id") @db.Uuid
-  createdById      String            @map("created_by") @db.Uuid
-  type             TransactionType
-  status           TransactionStatus @default(PAID)
-  splitMethod      SplitMethod       @default(INDIVIDUAL) @map("split_method")
-  description      String            @db.VarChar(160)
-  amount           Decimal           @db.Decimal(19, 4)
-  competenceDate   DateTime          @map("competence_date") @db.Date
-  dueDate          DateTime?         @map("due_date") @db.Date
-  paidAt           DateTime?         @map("paid_at") @db.Timestamptz(3)
-  notes            String?           @db.VarChar(500)
-  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt        DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
-  deletedAt        DateTime?         @map("deleted_at") @db.Timestamptz(3)
+  id                  String            @id @default(uuid()) @db.Uuid
+  financialSpaceId    String            @map("financial_space_id") @db.Uuid
+  accountId           String            @map("account_id") @db.Uuid
+  categoryId          String            @map("category_id") @db.Uuid
+  payerMemberId       String?           @map("payer_member_id") @db.Uuid
+  recurringRuleId     String?           @map("recurring_rule_id") @db.Uuid
+  creditCardInvoiceId String?           @map("credit_card_invoice_id") @db.Uuid
+  createdById         String            @map("created_by") @db.Uuid
+  type                TransactionType
+  status              TransactionStatus @default(PAID)
+  splitMethod         SplitMethod       @default(INDIVIDUAL) @map("split_method")
+  description         String            @db.VarChar(160)
+  amount              Decimal           @db.Decimal(19, 4)
+  competenceDate      DateTime          @map("competence_date") @db.Date
+  occurrenceDate      DateTime?         @map("occurrence_date") @db.Date
+  dueDate             DateTime?         @map("due_date") @db.Date
+  paidAt              DateTime?         @map("paid_at") @db.Timestamptz(3)
+  notes               String?           @db.VarChar(500)
+  createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt           DateTime?         @map("deleted_at") @db.Timestamptz(3)
 
-  financialSpace FinancialSpace     @relation(fields: [financialSpaceId], references: [id], onDelete: Cascade)
-  account        Account            @relation(fields: [accountId], references: [id], onDelete: Restrict)
-  category       Category           @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  payerMember    SpaceMember?       @relation("TransactionPayer", fields: [payerMemberId], references: [id], onDelete: Restrict)
-  creator        User               @relation("TransactionCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  splits         TransactionSplit[]
+  financialSpace    FinancialSpace     @relation(fields: [financialSpaceId], references: [id], onDelete: Cascade)
+  account           Account            @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  category          Category           @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  payerMember       SpaceMember?       @relation("TransactionPayer", fields: [payerMemberId], references: [id], onDelete: Restrict)
+  recurringRule     RecurringRule?     @relation("RecurringRuleTransactions", fields: [recurringRuleId, financialSpaceId], references: [id, financialSpaceId], onDelete: Restrict, map: "financial_transactions_recurring_rule_space_fkey")
+  creditCardInvoice CreditCardInvoice? @relation(fields: [creditCardInvoiceId, financialSpaceId], references: [id, financialSpaceId], onDelete: Restrict, map: "financial_transactions_invoice_space_fkey")
+  creator           User               @relation("TransactionCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  splits            TransactionSplit[]
 
   @@unique([id, financialSpaceId], map: "financial_transactions_id_financial_space_id_key")
+  @@unique([recurringRuleId, occurrenceDate], map: "financial_transactions_recurring_rule_occurrence_key")
   @@index([financialSpaceId, competenceDate])
+  @@index([financialSpaceId, occurrenceDate])
+  @@index([financialSpaceId, creditCardInvoiceId])
   @@index([financialSpaceId, status, dueDate])
   @@index([accountId, competenceDate])
   @@index([categoryId])
@@ -278,12 +315,118 @@ model TransactionSplit {
   @@map("transaction_splits")
 }
 
+model RecurringRule {
+  id               String              @id @default(uuid()) @db.Uuid
+  financialSpaceId String              @map("financial_space_id") @db.Uuid
+  accountId        String              @map("account_id") @db.Uuid
+  categoryId       String              @map("category_id") @db.Uuid
+  payerMemberId    String?             @map("payer_member_id") @db.Uuid
+  createdById      String              @map("created_by") @db.Uuid
+  type             TransactionType
+  status           TransactionStatus   @default(PENDING)
+  splitMethod      SplitMethod         @default(INDIVIDUAL) @map("split_method")
+  frequency        RecurrenceFrequency @default(MONTHLY)
+  state            RecurringRuleState  @default(ACTIVE)
+  description      String              @db.VarChar(160)
+  amount           Decimal             @db.Decimal(19, 4)
+  startDate        DateTime            @map("start_date") @db.Date
+  endDate          DateTime?           @map("end_date") @db.Date
+  dayOfMonth       Int                 @map("day_of_month")
+  nextOccurrence   DateTime?           @map("next_occurrence") @db.Date
+  notes            String?             @db.VarChar(500)
+  createdAt        DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt        DateTime?           @map("deleted_at") @db.Timestamptz(3)
+
+  financialSpace FinancialSpace         @relation(fields: [financialSpaceId], references: [id], onDelete: Cascade)
+  account        Account                @relation(fields: [accountId, financialSpaceId], references: [id, financialSpaceId], onDelete: Restrict, map: "recurring_rules_account_space_fkey")
+  category       Category               @relation(fields: [categoryId, financialSpaceId], references: [id, financialSpaceId], onDelete: Restrict, map: "recurring_rules_category_space_fkey")
+  payerMember    SpaceMember?           @relation("RecurringRulePayer", fields: [payerMemberId, financialSpaceId], references: [id, financialSpaceId], onDelete: Restrict, map: "recurring_rules_payer_space_fkey")
+  creator        User                   @relation("RecurringRuleCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  splits         RecurringRuleSplit[]
+  transactions   FinancialTransaction[] @relation("RecurringRuleTransactions")
+
+  @@unique([id, financialSpaceId], map: "recurring_rules_id_financial_space_id_key")
+  @@index([financialSpaceId, state, nextOccurrence])
+  @@index([financialSpaceId, deletedAt])
+  @@index([accountId])
+  @@index([categoryId])
+  @@map("recurring_rules")
+}
+
+model RecurringRuleSplit {
+  id               String   @id @default(uuid()) @db.Uuid
+  financialSpaceId String   @map("financial_space_id") @db.Uuid
+  recurringRuleId  String   @map("recurring_rule_id") @db.Uuid
+  memberId         String   @map("member_id") @db.Uuid
+  amount           Decimal  @db.Decimal(19, 4)
+  percentage       Decimal? @db.Decimal(7, 4)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  financialSpace FinancialSpace @relation(fields: [financialSpaceId], references: [id], onDelete: Cascade)
+  recurringRule  RecurringRule  @relation(fields: [recurringRuleId, financialSpaceId], references: [id, financialSpaceId], onDelete: Cascade, map: "recurring_rule_splits_rule_space_fkey")
+  member         SpaceMember    @relation(fields: [memberId, financialSpaceId], references: [id, financialSpaceId], onDelete: Restrict, map: "recurring_rule_splits_member_space_fkey")
+
+  @@unique([recurringRuleId, memberId], map: "recurring_rule_splits_rule_member_key")
+  @@index([financialSpaceId, memberId])
+  @@map("recurring_rule_splits")
+}
+
+model CreditCard {
+  id               String    @id @default(uuid()) @db.Uuid
+  financialSpaceId String    @map("financial_space_id") @db.Uuid
+  accountId        String    @map("account_id") @db.Uuid
+  bank             String    @db.VarChar(100)
+  creditLimit      Decimal   @map("credit_limit") @db.Decimal(19, 4)
+  closingDay       Int       @map("closing_day")
+  dueDay           Int       @map("due_day")
+  createdById      String    @map("created_by") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt        DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  financialSpace FinancialSpace      @relation(fields: [financialSpaceId], references: [id], onDelete: Cascade)
+  account        Account             @relation(fields: [accountId, financialSpaceId], references: [id, financialSpaceId], onDelete: Restrict, map: "credit_cards_account_space_fkey")
+  creator        User                @relation("CreditCardCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  invoices       CreditCardInvoice[]
+
+  @@unique([id, financialSpaceId], map: "credit_cards_id_financial_space_id_key")
+  @@unique([accountId, financialSpaceId], map: "credit_cards_account_space_key")
+  @@index([financialSpaceId, deletedAt])
+  @@map("credit_cards")
+}
+
+model CreditCardInvoice {
+  id               String                  @id @default(uuid()) @db.Uuid
+  financialSpaceId String                  @map("financial_space_id") @db.Uuid
+  creditCardId     String                  @map("credit_card_id") @db.Uuid
+  closingDate      DateTime                @map("closing_date") @db.Date
+  dueDate          DateTime                @map("due_date") @db.Date
+  status           CreditCardInvoiceStatus @default(OPEN)
+  closedAt         DateTime?               @map("closed_at") @db.Timestamptz(3)
+  paidAt           DateTime?               @map("paid_at") @db.Timestamptz(3)
+  createdAt        DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime                @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  financialSpace  FinancialSpace         @relation(fields: [financialSpaceId], references: [id], onDelete: Cascade)
+  creditCard      CreditCard             @relation(fields: [creditCardId, financialSpaceId], references: [id, financialSpaceId], onDelete: Restrict, map: "credit_card_invoices_card_space_fkey")
+  transactions    FinancialTransaction[]
+  paymentTransfer AccountTransfer?
+
+  @@unique([id, financialSpaceId], map: "credit_card_invoices_id_financial_space_id_key")
+  @@unique([creditCardId, closingDate], map: "credit_card_invoices_card_closing_date_key")
+  @@index([financialSpaceId, status, dueDate])
+  @@index([creditCardId, dueDate])
+  @@map("credit_card_invoices")
+}
+
 model AccountTransfer {
   id                   String    @id @default(uuid()) @db.Uuid
   financialSpaceId     String    @map("financial_space_id") @db.Uuid
   sourceAccountId      String    @map("source_account_id") @db.Uuid
   destinationAccountId String    @map("destination_account_id") @db.Uuid
   createdById          String    @map("created_by") @db.Uuid
+  creditCardInvoiceId  String?   @map("credit_card_invoice_id") @db.Uuid
   amount               Decimal   @db.Decimal(19, 4)
   transferDate         DateTime  @map("transfer_date") @db.Date
   description          String?   @db.VarChar(160)
@@ -292,11 +435,13 @@ model AccountTransfer {
   updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
   deletedAt            DateTime? @map("deleted_at") @db.Timestamptz(3)
 
-  financialSpace     FinancialSpace @relation(fields: [financialSpaceId], references: [id], onDelete: Cascade)
-  sourceAccount      Account        @relation("TransferSource", fields: [sourceAccountId, financialSpaceId], references: [id, financialSpaceId], onDelete: Restrict, map: "account_transfers_source_account_space_fkey")
-  destinationAccount Account        @relation("TransferDestination", fields: [destinationAccountId, financialSpaceId], references: [id, financialSpaceId], onDelete: Restrict, map: "account_transfers_destination_account_space_fkey")
-  creator            User           @relation("TransferCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  financialSpace     FinancialSpace     @relation(fields: [financialSpaceId], references: [id], onDelete: Cascade)
+  sourceAccount      Account            @relation("TransferSource", fields: [sourceAccountId, financialSpaceId], references: [id, financialSpaceId], onDelete: Restrict, map: "account_transfers_source_account_space_fkey")
+  destinationAccount Account            @relation("TransferDestination", fields: [destinationAccountId, financialSpaceId], references: [id, financialSpaceId], onDelete: Restrict, map: "account_transfers_destination_account_space_fkey")
+  creator            User               @relation("TransferCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  creditCardInvoice  CreditCardInvoice? @relation(fields: [creditCardInvoiceId, financialSpaceId], references: [id, financialSpaceId], onDelete: Restrict, map: "account_transfers_invoice_space_fkey")
 
+  @@unique([creditCardInvoiceId, financialSpaceId], map: "account_transfers_invoice_space_key")
   @@index([financialSpaceId, transferDate])
   @@index([sourceAccountId, transferDate])
   @@index([destinationAccountId, transferDate])

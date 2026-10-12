@@ -1,6 +1,6 @@
 # Aflora — gestão financeira compartilhada
 
-Aflora é uma aplicação web mobile-first para organizar a vida financeira de duas ou mais pessoas em espaços isolados. A fase atual inclui autenticação, convites de membros, troca de espaço, contas, categorias, movimentações, transferências e divisão proporcional à renda.
+Aflora é uma aplicação web mobile-first para organizar a vida financeira de duas ou mais pessoas em espaços isolados. A fase atual inclui autenticação, convites de membros, troca de espaço, contas, categorias, movimentações, transferências, divisão proporcional à renda, receitas ou despesas recorrentes e cartões de crédito com faturas.
 
 O acompanhamento por feature, com situação, entregas e próxima etapa, fica em [`docs/DEVELOPMENT_STATUS.md`](docs/DEVELOPMENT_STATUS.md).
 
@@ -59,6 +59,8 @@ As migrations atuais são:
 - `transfer_tenant_integrity`: vínculo composto das contas ao espaço e precisão de centavos no Neon.
 - `member_income_history`: histórico temporal de renda, isolamento por espaço e suporte a snapshots proporcionais com participação zero.
 - `transaction_split_tenant_integrity`: chaves compostas que impedem transação, membro e snapshot de rateio de pertencerem a espaços diferentes.
+- `recurring_rules`: regras mensais e seus snapshots de divisão, vínculos compostos ao espaço e ocorrências idempotentes por regra e competência.
+- `credit_cards_invoices`: cartões como contas contábeis internas, ciclos de fatura, compras vinculadas e pagamento único por transferência.
 
 Valores monetários ficam em `DECIMAL(19,4)` e entram no domínio como centavos inteiros, sem cálculos em ponto flutuante. Datas de competência e vencimento são datas civis (`DATE`); instantes técnicos usam `TIMESTAMPTZ`.
 
@@ -72,6 +74,12 @@ Valores monetários ficam em `DECIMAL(19,4)` e entram no domínio como centavos 
 - contas individuais ou compartilhadas e saldo inicial;
 - categorias de receita e despesa;
 - receitas e despesas pagas ou pendentes;
+- receitas e despesas recorrentes mensais, com dia-base preservado, término opcional e previsões futuras pendentes;
+- pausa, retomada, encerramento e atualização manual das previsões recorrentes, sem duplicar ocorrências já materializadas;
+- cartões de crédito com banco, titular, limite, fechamento e vencimento;
+- compras agrupadas automaticamente na fatura correta, inclusive em meses curtos, com os mesmos métodos de divisão das demais despesas;
+- faturas abertas, fechadas ou pagas, limite utilizado/disponível e histórico das compras;
+- pagamento integral da fatura por transferência de uma conta para o cartão, sem criar uma segunda despesa;
 - registro separado de quem pagou e de quem é responsável;
 - divisão individual, igualitária, percentual ou por valores personalizados, sempre fechando os centavos sem perda;
 - histórico de renda mensal por vigência e divisão proporcional, com prévia por pessoa, participantes válidos na competência e recálculo autoritativo no servidor;
@@ -79,7 +87,9 @@ Valores monetários ficam em `DECIMAL(19,4)` e entram no domínio como centavos 
 - dashboard com saldo, totais mensais, compromissos e registros recentes;
 - filtros básicos de movimentações.
 
-Todas as consultas financeiras partem do contexto autenticado. IDs vindos do formulário são novamente filtrados por `financial_space_id`, associação válida e soft delete antes de qualquer escrita. Nas transferências, no histórico de renda e nos snapshots de rateio, chaves estrangeiras compostas também impedem no banco associações entre espaços diferentes.
+Todas as consultas financeiras partem do contexto autenticado. IDs vindos do formulário são novamente filtrados por `financial_space_id`, associação válida e soft delete antes de qualquer escrita. Nas transferências, no histórico de renda, nas recorrências, nos cartões, nas faturas e nos snapshots de rateio, chaves estrangeiras compostas e gatilhos também impedem no banco associações inválidas ou entre espaços diferentes. Cada ocorrência gerada mantém o vínculo com sua regra e uma chave única por competência, tornando o reprocessamento idempotente.
+
+Uma compra no cartão é a própria despesa e reduz o limite disponível. O pagamento posterior não cria receita nem despesa: é uma transferência da conta pagadora para a conta contábil interna do cartão. A fatura só pode ser marcada como paga quando essa transferência existe, corresponde ao total integral e permanece vinculada ao mesmo espaço.
 
 ## Arquitetura
 
@@ -121,8 +131,8 @@ npm test
 npm run build
 ```
 
-Os testes cobrem autenticação, sessões, autorização de espaços, proxy, tokens e estados de convites, redirecionamentos seguros, precisão monetária, transferências e divisões iguais, percentuais, personalizadas e proporcionais à renda.
+Os testes cobrem autenticação, sessões, autorização de espaços, proxy, tokens e estados de convites, redirecionamentos seguros, precisão monetária, transferências, divisões iguais, percentuais, personalizadas e proporcionais à renda, recorrências mensais e o ciclo de cartões: fechamento, vencimento, limites, isolamento e pagamento sem duplicar despesas.
 
 ## Fora do escopo desta fase
 
-Recorrências, cartões, faturas, parcelas, dívidas, orçamentos, metas e relatórios avançados permanecem para fases posteriores. O modelo de `transaction_splits` preserva a separação entre pagador e responsável e agora também o snapshot do rateio proporcional.
+Compras parceladas, dívidas, orçamentos, metas e relatórios avançados permanecem para fases posteriores. O modelo de `transaction_splits` preserva a separação entre pagador e responsável e também o snapshot do rateio proporcional ou gerado por uma recorrência.

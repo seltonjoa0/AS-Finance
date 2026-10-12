@@ -1,6 +1,12 @@
 type AccountLabelInput = {
   name: string;
-  type: "CHECKING" | "SAVINGS" | "CASH" | "INVESTMENT" | "OTHER";
+  type:
+    | "CHECKING"
+    | "SAVINGS"
+    | "CASH"
+    | "INVESTMENT"
+    | "CREDIT_CARD"
+    | "OTHER";
   ownership: "INDIVIDUAL" | "SHARED";
   holderName?: string | null;
 };
@@ -10,6 +16,7 @@ const accountTypeLabels = {
   SAVINGS: "Poupança",
   CASH: "Dinheiro",
   INVESTMENT: "Investimento",
+  CREDIT_CARD: "Cartão de crédito",
   OTHER: "Outra",
 } as const;
 

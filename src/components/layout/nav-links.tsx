@@ -1,10 +1,12 @@
 "use client";
 
 import {
+  CreditCard,
   FolderTree,
   Home,
   Plus,
   ReceiptText,
+  Repeat2,
   Settings,
   UserRound,
   WalletCards,
@@ -15,6 +17,8 @@ import { usePathname } from "next/navigation";
 const navItems = [
   { href: "/app", label: "Visão geral", mobileLabel: "Início", icon: Home },
   { href: "/app/movimentacoes", label: "Movimentações", mobileLabel: "Movimentos", icon: ReceiptText },
+  { href: "/app/recorrencias", label: "Recorrências", mobileLabel: "Recorrentes", icon: Repeat2 },
+  { href: "/app/cartoes", label: "Cartões", mobileLabel: "Cartões", icon: CreditCard },
   { href: "/app/contas", label: "Contas", mobileLabel: "Contas", icon: WalletCards },
   { href: "/app/categorias", label: "Categorias", mobileLabel: "Categorias", icon: FolderTree },
   { href: "/app/configuracoes", label: "Configurações", mobileLabel: "Ajustes", icon: Settings },
@@ -30,11 +34,12 @@ export function NavLinks({ mobile = false }: { mobile?: boolean }) {
       navItems[1]!,
       { href: "/app/movimentacoes/nova", label: "Adicionar", mobileLabel: "Adicionar", icon: Plus },
       navItems[2]!,
-      navItems[4]!,
+      navItems[3]!,
+      navItems[6]!,
     ];
 
     return (
-      <ul className="mx-auto grid max-w-md grid-cols-5">
+      <ul className="mx-auto grid max-w-lg grid-cols-6">
         {mobileItems.map(({ href, mobileLabel, icon: Icon }) => {
           const isAdd = href === "/app/movimentacoes/nova";
           const active = isAdd

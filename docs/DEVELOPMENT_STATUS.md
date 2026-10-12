@@ -34,15 +34,47 @@ Este documento é atualizado ao término de cada feature. Ele registra o que foi
 | Validação | Concluída | Testes automatizados, typecheck e lint aprovados; casos de renda zero, mudança de vigência, maior resto, fechamento exato de percentuais/centavos e centavo indivisível cobertos. |
 | Documentação | Concluída | README e este controle atualizados com a capacidade e a migration nova. |
 
-## Próxima etapa — Receitas e despesas recorrentes
+## Feature concluída — Receitas e despesas recorrentes
+
+| Área | Situação | Entregue |
+| --- | --- | --- |
+| Modelagem | Concluída | Regras mensais com valor, conta, categoria, pagador, rateio, dia-base, início, término opcional, próxima ocorrência e estados ativa, pausada ou encerrada. |
+| Banco Neon | Concluída | Migration com snapshots de divisão, vínculos compostos ao espaço e chave única por regra e competência para impedir ocorrências duplicadas. |
+| Calendário | Concluída | Dia-base preservado; meses curtos usam o último dia disponível sem deslocar os meses seguintes, inclusive em anos bissextos. |
+| Geração | Concluída | Previsões pendentes materializadas até seis meses à frente por upsert idempotente, com atualização manual do horizonte. |
+| Regras financeiras | Concluída | Cada ocorrência reutiliza conta, categoria, pagador e método de divisão; o rateio proporcional usa a renda vigente em cada competência. |
+| Ciclo de vida | Concluída | Pausa retira previsões futuras pendentes, retomada as restaura sem duplicidade e encerramento preserva o histórico já ocorrido. |
+| Segurança | Concluída | Conta, categoria, pagador, membros, regra e ocorrências são revalidados no espaço autenticado, com integridade multi-tenant também no banco. |
+| Interface | Concluída | Página responsiva para criar, listar, pausar, retomar, encerrar e atualizar recorrências, integrada à navegação e identificada no histórico de movimentações. |
+| Validação | Concluída | Testes de schema, domínio, materialização, idempotência, isolamento por espaço e ciclo de vida, além de typecheck, lint e build. |
+| Documentação | Concluída | README e este controle atualizados com a capacidade e a migration nova. |
+
+## Feature concluída — Cartões de crédito e faturas
+
+| Área | Situação | Entregue |
+| --- | --- | --- |
+| Modelagem | Concluída | Cartão vinculado a uma conta contábil interna individual, com banco, titular, limite, fechamento, vencimento e soft delete. |
+| Banco Neon | Concluída | Migration com faturas `OPEN`, `CLOSED` e `PAID`, vínculos compostos ao espaço e invariantes para conta, compra e pagamento. |
+| Ciclos | Concluída | Compras entram automaticamente na fatura correta; dias inexistentes usam o último dia do mês e o vencimento permanece posterior ao fechamento. |
+| Regra financeira | Concluída | A compra é registrada uma única vez como despesa; pagar a fatura cria somente uma transferência integral da conta bancária para o cartão. |
+| Faturas | Concluída | Fechamento liberado apenas na data prevista, pagamento somente após fechamento e estados protegidos contra regressão ou alteração posterior. |
+| Limites | Concluída | Limite utilizado, disponível e excedido calculados em centavos pelo saldo contábil do cartão, considerando compras e pagamentos. |
+| Rateios | Concluída | Compras aceitam responsabilidade individual, igualitária, percentual, personalizada ou proporcional à renda vigente, inclusive no histórico. |
+| Interface | Concluída | Página mobile-first com cadastro, resumo de limites, faturas, lista de compras, fechamento e pagamento, integrada à navegação e ao histórico. |
+| Segurança | Concluída | Cartão, categoria, membros, fatura e conta pagadora são revalidados no espaço; compras e pagamentos de faturas ficam protegidos também no banco. |
+| Concorrência | Concluída | Fatura única por ciclo, pagamento único por fatura e repetição concorrente tratada de forma idempotente. |
+| Validação | Concluída | Testes de schema, calendário, limite, actions, isolamento, fechamento e pagamento sem despesa duplicada, além de typecheck, lint e build. |
+| Documentação | Concluída | README e este controle registram a regra contábil do cartão e a nova migration. |
+
+## Próxima etapa — Compras parceladas
 
 | Área | Situação | Planejado |
 | --- | --- | --- |
-| Modelagem | Planejada | Criar regras de recorrência com frequência, início, término opcional, próxima competência e estado ativo. |
-| Geração | Planejada | Materializar ocorrências de forma idempotente, sem duplicar lançamentos em reprocessamentos. |
-| Regras financeiras | Planejada | Reaproveitar conta, categoria, status, pagador e método de divisão da regra original. |
-| Interface | Planejada | Permitir criar, consultar, pausar e encerrar recorrências com clareza no mobile. |
-| Segurança | Planejada | Revalidar todos os vínculos no espaço ativo e registrar autoria das alterações. |
-| Testes | Planejada | Cobrir virada de mês, meses curtos, término, pausa e prevenção de duplicidade. |
+| Modelagem | Planejada | Criar compra parcelada e parcelas imutáveis, preservando valor total, quantidade, número atual e cartão. |
+| Calendário | Planejada | Distribuir cada parcela nas faturas mensais corretas, inclusive em meses curtos, sem duplicidade. |
+| Regra financeira | Planejada | Reconhecer a despesa por parcela na competência correspondente e manter o pagamento da fatura como transferência. |
+| Responsabilidade | Planejada | Reaproveitar pagador, categoria e snapshots dos cinco métodos de divisão em todas as parcelas. |
+| Interface | Planejada | Cadastro simples, visão de parcelas pagas/futuras, saldo restante e quantidade de parcelas restantes. |
+| Segurança e testes | Planejada | Garantir isolamento por espaço, fechamento exato em centavos, idempotência e integração com faturas já fechadas. |
 
-Depois de recorrências, a sequência prevista é: cartões e faturas, compras parceladas, dívidas, planejamento e orçamentos.
+Depois de compras parceladas, a sequência prevista é: dívidas e empréstimos, planejamento mensal e orçamentos.

@@ -177,13 +177,11 @@ describe("createTransactionAction com divisão proporcional à renda", () => {
         splits: {
           create: [
             {
-              financialSpaceId: ids.space,
               memberId: ids.memberA,
               amount: "62.50",
               percentage: "62.5000",
             },
             {
-              financialSpaceId: ids.space,
               memberId: ids.memberB,
               amount: "37.50",
               percentage: "37.5000",

@@ -252,7 +252,7 @@ export async function createTransferAction(
       financialSpaceId: context.space.id,
       deletedAt: null,
     },
-    select: { id: true, currency: true },
+    select: { id: true, currency: true, type: true },
   });
   const accountById = new Map(accounts.map((account) => [account.id, account]));
   const sourceAccount = accountById.get(data.sourceAccountId);
@@ -268,6 +268,16 @@ export async function createTransferAction(
     return {
       status: "error",
       fieldErrors: { destinationAccountId: ["Conta de destino inválida para este espaço."] },
+    };
+  }
+  if (
+    sourceAccount.type === "CREDIT_CARD" ||
+    destinationAccount.type === "CREDIT_CARD"
+  ) {
+    return {
+      status: "error",
+      message:
+        "Pagamentos de cartão devem ser registrados pela fatura correspondente.",
     };
   }
   if (sourceAccount.currency !== destinationAccount.currency) {
@@ -318,7 +328,7 @@ export async function createTransactionAction(
   const [account, category, eligibleMembers] = await Promise.all([
     database().account.findFirst({
       where: { id: data.accountId, financialSpaceId: context.space.id, deletedAt: null },
-      select: { id: true },
+      select: { id: true, type: true },
     }),
     database().category.findFirst({
       where: { id: data.categoryId, financialSpaceId: context.space.id, deletedAt: null },
@@ -343,6 +353,14 @@ export async function createTransactionAction(
 
   if (!account) {
     return { status: "error", fieldErrors: { accountId: ["Conta inválida para este espaço."] } };
+  }
+  if (account.type === "CREDIT_CARD") {
+    return {
+      status: "error",
+      fieldErrors: {
+        accountId: ["Registre compras de cartão na área de cartões e faturas."],
+      },
+    };
   }
   if (!category || category.type !== data.type) {
     return {
@@ -432,7 +450,6 @@ export async function createTransactionAction(
         notes: data.notes || null,
         splits: {
           create: splitResult.splits.map((split) => ({
-            financialSpaceId: context.space.id,
             memberId: split.memberId,
             amount: centsToDecimal(split.cents),
             percentage: split.percentage ?? null,
