@@ -18,9 +18,12 @@ export function SelectField({
   ...props
 }: SelectFieldProps) {
   const fieldId = id ?? name;
-  const describedBy = [error && `${fieldId}-error`, hint && `${fieldId}-hint`]
+  const describedBy = [
+    hint ? `${fieldId}-hint` : null,
+    error ? `${fieldId}-error` : null,
+  ]
     .filter(Boolean)
-    .join(" ");
+    .join(" ") || undefined;
 
   return (
     <div className="min-w-0 space-y-2">
@@ -31,7 +34,7 @@ export function SelectField({
         id={fieldId}
         name={name}
         aria-invalid={Boolean(error)}
-        aria-describedby={describedBy || undefined}
+        aria-describedby={describedBy}
         className={`h-12 w-full rounded-2xl border bg-white px-4 text-[15px] text-ink outline-none transition ${
           error
             ? "border-red-300 focus:border-red-400 focus:ring-4 focus:ring-red-100"
@@ -41,15 +44,16 @@ export function SelectField({
       >
         {children}
       </select>
-      {error ? (
-        <p id={`${fieldId}-error`} className="text-sm text-red-600" role="alert">
-          {error}
-        </p>
-      ) : hint ? (
+      {hint && (
         <p id={`${fieldId}-hint`} className="text-xs leading-relaxed text-muted">
           {hint}
         </p>
-      ) : null}
+      )}
+      {error && (
+        <p id={`${fieldId}-error`} className="text-sm text-red-600" role="alert">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

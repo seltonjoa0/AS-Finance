@@ -181,7 +181,7 @@ export async function getAccountsWithBalances(financialSpaceId: string) {
 }
 
 export async function getFinanceCatalog(financialSpaceId: string) {
-  const [accounts, categories, members] = await Promise.all([
+  const [accounts, categories, members, incomeHistory] = await Promise.all([
     database().account.findMany({
       where: { financialSpaceId, deletedAt: null },
       select: {
@@ -199,16 +199,72 @@ export async function getFinanceCatalog(financialSpaceId: string) {
       orderBy: { name: "asc" },
     }),
     database().spaceMember.findMany({
-      where: { financialSpaceId, revokedAt: null },
-      select: { id: true, user: { select: { name: true } } },
+      where: { financialSpaceId },
+      select: {
+        id: true,
+        createdAt: true,
+        revokedAt: true,
+        user: { select: { name: true } },
+      },
       orderBy: { createdAt: "asc" },
+    }),
+    database().memberIncome.findMany({
+      where: { financialSpaceId },
+      select: { memberId: true, amount: true, effectiveFrom: true },
+      orderBy: [{ effectiveFrom: "desc" }, { createdAt: "desc" }],
     }),
   ]);
 
   return {
     accounts,
     categories,
+    members: members.map((member) => ({
+      id: member.id,
+      name: member.user.name,
+      joinedAt: member.createdAt.toISOString(),
+      revokedAt: member.revokedAt?.toISOString() ?? null,
+    })),
+    incomeHistory: incomeHistory.map((income) => ({
+      memberId: income.memberId,
+      amount: income.amount.toString(),
+      effectiveFrom: income.effectiveFrom.toISOString().slice(0, 10),
+    })),
+  };
+}
+
+export async function getMemberIncomeHistory(financialSpaceId: string) {
+  const [members, history] = await Promise.all([
+    database().spaceMember.findMany({
+      where: { financialSpaceId, revokedAt: null },
+      select: { id: true, user: { select: { name: true } } },
+      orderBy: { createdAt: "asc" },
+    }),
+    database().memberIncome.findMany({
+      where: { financialSpaceId },
+      select: {
+        id: true,
+        memberId: true,
+        amount: true,
+        effectiveFrom: true,
+        createdAt: true,
+        creator: { select: { name: true } },
+        member: { select: { user: { select: { name: true } } } },
+      },
+      orderBy: [{ effectiveFrom: "desc" }, { createdAt: "asc" }],
+    }),
+  ]);
+
+  return {
     members: members.map((member) => ({ id: member.id, name: member.user.name })),
+    history: history.map((income) => ({
+      id: income.id,
+      memberId: income.memberId,
+      amount: income.amount.toString(),
+      effectiveFrom: income.effectiveFrom.toISOString().slice(0, 10),
+      createdAt: income.createdAt,
+      createdBy: income.creator.name,
+      memberName: income.member.user.name,
+    })),
   };
 }
 

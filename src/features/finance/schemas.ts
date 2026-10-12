@@ -37,6 +37,13 @@ export const categorySchema = z.object({
   type: z.enum(["INCOME", "EXPENSE"]),
 });
 
+export const incomeSettingsSchema = z.object({
+  effectiveFrom: z.string().refine(isCivilDate, "Informe uma data de vigência válida."),
+  incomeDetails: z
+    .string()
+    .max(20_000, "A configuração de renda informada é muito extensa."),
+});
+
 export function transferSchemaForDate(maxTransferDate?: string) {
   return z
     .object({
@@ -93,7 +100,7 @@ export const transactionSchema = z
     categoryId: uuid,
     payerMemberId: optionalUuid,
     responsibleMemberId: optionalUuid,
-    splitMethod: z.enum(["INDIVIDUAL", "EQUAL", "PERCENTAGE", "CUSTOM"]),
+    splitMethod: z.enum(["INDIVIDUAL", "EQUAL", "PERCENTAGE", "CUSTOM", "INCOME_BASED"]),
     splitDetails: z.string().max(20_000, "A divisão informada é muito extensa.").default("[]"),
     competenceDate: z.string().refine(isCivilDate, "Informe uma data válida."),
     dueDate: optionalDate,

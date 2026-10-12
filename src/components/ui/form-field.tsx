@@ -16,9 +16,12 @@ export function FormField({
   ...props
 }: FormFieldProps) {
   const fieldId = id ?? name;
-  const describedBy = [error && `${fieldId}-error`, hint && `${fieldId}-hint`]
+  const describedBy = [
+    hint ? `${fieldId}-hint` : null,
+    error ? `${fieldId}-error` : null,
+  ]
     .filter(Boolean)
-    .join(" ");
+    .join(" ") || undefined;
 
   return (
     <div className="space-y-2">
@@ -29,7 +32,7 @@ export function FormField({
         id={fieldId}
         name={name}
         aria-invalid={Boolean(error)}
-        aria-describedby={describedBy || undefined}
+        aria-describedby={describedBy}
         className={`h-12 w-full rounded-2xl border bg-white px-4 text-[15px] text-ink shadow-[0_1px_2px_rgba(20,40,28,0.02)] outline-none transition placeholder:text-[#a3aaa5] ${
           error
             ? "border-red-300 focus:border-red-400 focus:ring-4 focus:ring-red-100"
@@ -37,15 +40,16 @@ export function FormField({
         } ${className}`}
         {...props}
       />
-      {error ? (
-        <p id={`${fieldId}-error`} className="text-sm text-red-600" role="alert">
-          {error}
-        </p>
-      ) : hint ? (
+      {hint && (
         <p id={`${fieldId}-hint`} className="text-xs leading-relaxed text-muted">
           {hint}
         </p>
-      ) : null}
+      )}
+      {error && (
+        <p id={`${fieldId}-error`} className="text-sm text-red-600" role="alert">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

@@ -1,8 +1,26 @@
 import type { Metadata } from "next";
-import { Clock3, Crown, Globe2, Mail, ShieldCheck, UserPlus, UsersRound } from "lucide-react";
+import {
+  ChartPie,
+  Clock3,
+  Crown,
+  Globe2,
+  Mail,
+  ShieldCheck,
+  UserPlus,
+  UsersRound,
+} from "lucide-react";
 
 import { SpaceSettingsForm } from "@/components/auth/space-settings-form";
+import { IncomeSettingsForm } from "@/components/finance/income-settings-form";
 import { InvitationForm } from "@/components/invitations/invitation-form";
+import {
+  civilDate,
+  formatCivilDate,
+  todayInTimezone,
+} from "@/features/finance/dates";
+import { resolveIncomeDetails } from "@/features/finance/incomes";
+import { formatCents, parseMoneyToCents } from "@/features/finance/money";
+import { getMemberIncomeHistory } from "@/features/finance/queries";
 import { revokeInvitationAction } from "@/features/invitations/actions";
 import { requireFinancialContext } from "@/lib/auth/session";
 import { database } from "@/lib/db/client";
@@ -11,7 +29,7 @@ export const metadata: Metadata = { title: "Configurações" };
 
 export default async function SettingsPage() {
   const context = await requireFinancialContext();
-  const [members, invitations] = await Promise.all([
+  const [members, invitations, incomeData] = await Promise.all([
     database().spaceMember.findMany({
       where: {
         financialSpaceId: context.space.id,
@@ -29,7 +47,23 @@ export default async function SettingsPage() {
       orderBy: { createdAt: "desc" },
       take: 10,
     }),
+    getMemberIncomeHistory(context.space.id),
   ]);
+  const today = todayInTimezone(context.space.timezone);
+  const currentIncome = resolveIncomeDetails({
+    memberIds: incomeData.members.map((member) => member.id),
+    history: incomeData.history,
+    competenceDate: today,
+  });
+  const currentIncomeByMember = new Map(
+    currentIncome.details.map((detail) => [detail.memberId, detail.value]),
+  );
+  const historyByDate = new Map<string, typeof incomeData.history>();
+  for (const income of incomeData.history) {
+    const group = historyByDate.get(income.effectiveFrom) ?? [];
+    group.push(income);
+    historyByDate.set(income.effectiveFrom, group);
+  }
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -183,6 +217,111 @@ export default async function SettingsPage() {
           })}
         </ul>
 
+      </section>
+
+      <section
+        id="rendas"
+        className="mt-5 scroll-mt-24 rounded-[20px] border border-line bg-white p-5 shadow-card sm:p-7"
+      >
+        <div className="flex items-start gap-3 border-b border-line pb-5">
+          <span className="grid size-10 shrink-0 place-items-center rounded-2xl bg-brand-100 text-brand-700">
+            <ChartPie className="size-5" aria-hidden="true" />
+          </span>
+          <div>
+            <h2 className="font-bold text-ink">Renda mensal de referência</h2>
+            <p className="mt-0.5 text-xs leading-5 text-muted">
+              Base histórica para dividir despesas proporcionalmente
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-6 grid gap-7 lg:grid-cols-[1.05fr_0.95fr]">
+          <div>
+            {context.membership.role === "OWNER" ? (
+              <IncomeSettingsForm
+                key={context.space.id}
+                today={today}
+                members={incomeData.members.map((member) => {
+                  const value = currentIncomeByMember.get(member.id);
+                  const cents = value === undefined ? null : parseMoneyToCents(value);
+                  return {
+                    ...member,
+                    currentIncome:
+                      cents === null
+                        ? null
+                        : formatCents(cents).replace(/^R\$\s*/, ""),
+                  };
+                })}
+              />
+            ) : (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm leading-6 text-amber-900">
+                Somente o proprietário do espaço pode registrar uma nova vigência.
+                Os valores atuais continuam visíveis para conferir o rateio.
+              </div>
+            )}
+          </div>
+
+          <div>
+            <h3 className="text-sm font-bold text-ink">Vigente hoje</h3>
+            <ul className="mt-3 divide-y divide-line rounded-2xl border border-line px-4">
+              {incomeData.members.map((member) => {
+                const value = currentIncomeByMember.get(member.id);
+                const cents = value === undefined ? null : parseMoneyToCents(value);
+                return (
+                  <li key={member.id} className="flex items-center justify-between gap-4 py-3">
+                    <span className="min-w-0 truncate text-sm font-semibold text-ink">
+                      {member.name}
+                    </span>
+                    <span
+                      className={`shrink-0 text-sm font-bold ${
+                        cents === null ? "text-amber-700" : "text-ink"
+                      }`}
+                    >
+                      {cents === null ? "Não configurada" : formatCents(cents)}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+
+            <h3 className="mt-6 text-sm font-bold text-ink">Histórico de vigências</h3>
+            {historyByDate.size === 0 ? (
+              <div className="mt-3 rounded-2xl bg-canvas px-4 py-6 text-center">
+                <p className="text-xs leading-5 text-muted">
+                  Nenhuma renda de referência foi registrada.
+                </p>
+              </div>
+            ) : (
+              <ol className="mt-3 space-y-3">
+                {[...historyByDate.entries()].map(([effectiveFrom, incomes]) => (
+                  <li key={effectiveFrom} className="rounded-2xl border border-line p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs font-extrabold text-ink">
+                        Desde {formatCivilDate(civilDate(effectiveFrom))}
+                      </p>
+                      <p className="text-[11px] text-muted">
+                        por {incomes[0]?.createdBy}
+                      </p>
+                    </div>
+                    <dl className="mt-3 space-y-2">
+                      {incomes.map((income) => {
+                        const cents = parseMoneyToCents(income.amount)!;
+                        return (
+                          <div key={income.id} className="flex justify-between gap-4 text-xs">
+                            <dt className="truncate text-muted">
+                              {income.memberName}
+                            </dt>
+                            <dd className="shrink-0 font-bold text-ink">{formatCents(cents)}</dd>
+                          </div>
+                        );
+                      })}
+                    </dl>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+        </div>
       </section>
     </div>
   );

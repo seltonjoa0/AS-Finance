@@ -11,6 +11,38 @@ export function civilDate(value: string) {
   return new Date(`${value}T00:00:00.000Z`);
 }
 
+export function civilDateInterval(value: string) {
+  const start = civilDate(value);
+  const endExclusive = new Date(start);
+  endExclusive.setUTCDate(endExclusive.getUTCDate() + 1);
+
+  return { start, endExclusive };
+}
+
+export function isMembershipValidOnCivilDate(
+  membership: {
+    joinedAt: string | Date;
+    revokedAt: string | Date | null;
+  },
+  value: string,
+) {
+  if (!isCivilDate(value)) return false;
+
+  const { start, endExclusive } = civilDateInterval(value);
+  const joinedAt =
+    membership.joinedAt instanceof Date
+      ? membership.joinedAt
+      : new Date(membership.joinedAt);
+  const revokedAt =
+    membership.revokedAt instanceof Date
+      ? membership.revokedAt
+      : membership.revokedAt
+        ? new Date(membership.revokedAt)
+        : null;
+
+  return joinedAt < endExclusive && (revokedAt === null || revokedAt > start);
+}
+
 export function todayInTimezone(timeZone: string) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,

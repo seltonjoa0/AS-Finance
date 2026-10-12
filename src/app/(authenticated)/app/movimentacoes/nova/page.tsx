@@ -47,6 +47,8 @@ export default async function NewTransactionPage() {
             accounts={catalog.accounts}
             categories={catalog.categories}
             members={catalog.members}
+            incomeHistory={catalog.incomeHistory}
+            canManageIncome={context.membership.role === "OWNER"}
             today={todayInTimezone(context.space.timezone)}
             initialType={hasExpense ? "EXPENSE" : "INCOME"}
           />

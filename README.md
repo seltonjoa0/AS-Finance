@@ -1,6 +1,6 @@
 # Aflora — gestão financeira compartilhada
 
-Aflora é uma aplicação web mobile-first para organizar a vida financeira de duas ou mais pessoas em espaços isolados. A fase atual inclui autenticação, convites de membros, troca de espaço, contas, categorias, movimentações e transferências.
+Aflora é uma aplicação web mobile-first para organizar a vida financeira de duas ou mais pessoas em espaços isolados. A fase atual inclui autenticação, convites de membros, troca de espaço, contas, categorias, movimentações, transferências e divisão proporcional à renda.
 
 O acompanhamento por feature, com situação, entregas e próxima etapa, fica em [`docs/DEVELOPMENT_STATUS.md`](docs/DEVELOPMENT_STATUS.md).
 
@@ -57,6 +57,8 @@ As migrations atuais são:
 - `invitation_guards`: integridade do aceite e apenas um convite ativo por e-mail/espaço.
 - `account_transfers`: transferências internas entre contas sem duplicar receitas ou despesas.
 - `transfer_tenant_integrity`: vínculo composto das contas ao espaço e precisão de centavos no Neon.
+- `member_income_history`: histórico temporal de renda, isolamento por espaço e suporte a snapshots proporcionais com participação zero.
+- `transaction_split_tenant_integrity`: chaves compostas que impedem transação, membro e snapshot de rateio de pertencerem a espaços diferentes.
 
 Valores monetários ficam em `DECIMAL(19,4)` e entram no domínio como centavos inteiros, sem cálculos em ponto flutuante. Datas de competência e vencimento são datas civis (`DATE`); instantes técnicos usam `TIMESTAMPTZ`.
 
@@ -72,11 +74,12 @@ Valores monetários ficam em `DECIMAL(19,4)` e entram no domínio como centavos 
 - receitas e despesas pagas ou pendentes;
 - registro separado de quem pagou e de quem é responsável;
 - divisão individual, igualitária, percentual ou por valores personalizados, sempre fechando os centavos sem perda;
+- histórico de renda mensal por vigência e divisão proporcional, com prévia por pessoa, participantes válidos na competência e recálculo autoritativo no servidor;
 - transferências entre contas, refletidas nos saldos individuais sem alterar o saldo consolidado;
 - dashboard com saldo, totais mensais, compromissos e registros recentes;
 - filtros básicos de movimentações.
 
-Todas as consultas financeiras partem do contexto autenticado. IDs vindos do formulário são novamente filtrados por `financial_space_id`, associação ativa e soft delete antes de qualquer escrita. Nas transferências, chaves estrangeiras compostas também impedem no banco que uma conta de outro espaço seja vinculada por escrita direta.
+Todas as consultas financeiras partem do contexto autenticado. IDs vindos do formulário são novamente filtrados por `financial_space_id`, associação válida e soft delete antes de qualquer escrita. Nas transferências, no histórico de renda e nos snapshots de rateio, chaves estrangeiras compostas também impedem no banco associações entre espaços diferentes.
 
 ## Arquitetura
 
@@ -118,8 +121,8 @@ npm test
 npm run build
 ```
 
-Os testes cobrem autenticação, sessões, autorização de espaços, proxy, tokens e estados de convites, redirecionamentos seguros, precisão monetária, transferências e divisões iguais, percentuais e personalizadas.
+Os testes cobrem autenticação, sessões, autorização de espaços, proxy, tokens e estados de convites, redirecionamentos seguros, precisão monetária, transferências e divisões iguais, percentuais, personalizadas e proporcionais à renda.
 
 ## Fora do escopo desta fase
 
-Cartões, faturas, parcelas, divisão proporcional à renda, dívidas, orçamentos, metas e relatórios avançados permanecem para fases posteriores. O modelo de `transaction_splits` já preserva a separação entre pagador e responsável para essa evolução.
+Recorrências, cartões, faturas, parcelas, dívidas, orçamentos, metas e relatórios avançados permanecem para fases posteriores. O modelo de `transaction_splits` preserva a separação entre pagador e responsável e agora também o snapshot do rateio proporcional.

@@ -57,15 +57,16 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  createdSpaces       FinancialSpace[]       @relation("SpaceCreator")
-  memberships         SpaceMember[]
-  sessions            Session[]
-  createdAccounts     Account[]              @relation("AccountCreator")
-  createdCategories   Category[]             @relation("CategoryCreator")
-  createdTransactions FinancialTransaction[] @relation("TransactionCreator")
-  createdTransfers    AccountTransfer[]      @relation("TransferCreator")
-  createdInvitations  SpaceInvitation[]      @relation("InvitationCreator")
-  acceptedInvitations SpaceInvitation[]      @relation("InvitationAccepter")
+  createdSpaces        FinancialSpace[]       @relation("SpaceCreator")
+  memberships          SpaceMember[]
+  sessions             Session[]
+  createdAccounts      Account[]              @relation("AccountCreator")
+  createdCategories    Category[]             @relation("CategoryCreator")
+  createdTransactions  FinancialTransaction[] @relation("TransactionCreator")
+  createdTransfers     AccountTransfer[]      @relation("TransferCreator")
+  createdMemberIncomes MemberIncome[]         @relation("MemberIncomeCreator")
+  createdInvitations   SpaceInvitation[]      @relation("InvitationCreator")
+  acceptedInvitations  SpaceInvitation[]      @relation("InvitationAccepter")
 
   @@map("users")
 }
@@ -88,6 +89,7 @@ model FinancialSpace {
   transactions      FinancialTransaction[]
   transactionSplits TransactionSplit[]
   transfers         AccountTransfer[]
+  memberIncomes     MemberIncome[]
   invitations       SpaceInvitation[]
 
   @@index([createdById])
@@ -109,10 +111,31 @@ model SpaceMember {
   heldAccounts      Account[]              @relation("AccountHolder")
   paidTransactions  FinancialTransaction[] @relation("TransactionPayer")
   transactionSplits TransactionSplit[]
+  incomeHistory     MemberIncome[]
 
   @@unique([financialSpaceId, userId])
+  @@unique([id, financialSpaceId], map: "space_members_id_financial_space_id_key")
   @@index([userId, revokedAt])
   @@map("space_members")
+}
+
+model MemberIncome {
+  id               String   @id @default(uuid()) @db.Uuid
+  financialSpaceId String   @map("financial_space_id") @db.Uuid
+  memberId         String   @map("member_id") @db.Uuid
+  amount           Decimal  @db.Decimal(19, 4)
+  effectiveFrom    DateTime @map("effective_from") @db.Date
+  createdById      String   @map("created_by") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  financialSpace FinancialSpace @relation(fields: [financialSpaceId], references: [id], onDelete: Cascade)
+  member         SpaceMember    @relation(fields: [memberId, financialSpaceId], references: [id, financialSpaceId], onDelete: Restrict, map: "member_incomes_member_space_fkey")
+  creator        User           @relation("MemberIncomeCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([financialSpaceId, memberId, effectiveFrom], map: "member_incomes_space_member_effective_key")
+  @@index([financialSpaceId, effectiveFrom])
+  @@index([memberId, effectiveFrom])
+  @@map("member_incomes")
 }
 
 model Session {
@@ -229,6 +252,7 @@ model FinancialTransaction {
   creator        User               @relation("TransactionCreator", fields: [createdById], references: [id], onDelete: Restrict)
   splits         TransactionSplit[]
 
+  @@unique([id, financialSpaceId], map: "financial_transactions_id_financial_space_id_key")
   @@index([financialSpaceId, competenceDate])
   @@index([financialSpaceId, status, dueDate])
   @@index([accountId, competenceDate])
@@ -246,8 +270,8 @@ model TransactionSplit {
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   financialSpace FinancialSpace       @relation(fields: [financialSpaceId], references: [id], onDelete: Cascade)
-  transaction    FinancialTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  member         SpaceMember          @relation(fields: [memberId], references: [id], onDelete: Restrict)
+  transaction    FinancialTransaction @relation(fields: [transactionId, financialSpaceId], references: [id, financialSpaceId], onDelete: Cascade, map: "transaction_splits_transaction_space_fkey")
+  member         SpaceMember          @relation(fields: [memberId, financialSpaceId], references: [id, financialSpaceId], onDelete: Restrict, map: "transaction_splits_member_space_fkey")
 
   @@unique([transactionId, memberId])
   @@index([financialSpaceId, memberId])

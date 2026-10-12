@@ -16,7 +16,7 @@ const splitMethodLabels = {
   EQUAL: "Divisão igual",
   PERCENTAGE: "Divisão percentual",
   CUSTOM: "Divisão personalizada",
-  INCOME_BASED: "Divisão por renda",
+  INCOME_BASED: "Proporcional à renda",
 } as const;
 
 function formatStoredPercentage(value: { toString(): string }) {
@@ -187,11 +187,11 @@ export default async function TransactionsPage({
                   </div>
                   {transaction.splits.length > 0 && (
                     <div className="mt-3 flex flex-wrap items-center gap-1.5 sm:ml-[52px]">
-                      <span className="mr-1 text-[11px] font-bold text-muted">
+                      <span className="mr-1 text-xs font-bold text-muted">
                         {splitMethodLabels[transaction.splitMethod]}:
                       </span>
                       {transaction.splits.map((split) => (
-                        <span key={split.id} className="rounded-full bg-canvas px-2.5 py-1 text-[11px] font-semibold text-ink">
+                        <span key={split.id} className="rounded-full bg-canvas px-2.5 py-1 text-xs font-semibold text-ink">
                           {split.member.user.name}: {formatCents(decimalToCents(split.amount), context.space.currency)}
                           {split.percentage ? ` (${formatStoredPercentage(split.percentage)}%)` : ""}
                         </span>

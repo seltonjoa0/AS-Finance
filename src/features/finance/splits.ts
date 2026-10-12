@@ -5,7 +5,12 @@ const PERCENTAGE_SCALE = 10n ** BigInt(PERCENTAGE_DECIMALS);
 const FULL_PERCENTAGE = 100n * PERCENTAGE_SCALE;
 const PERCENTAGE_PATTERN = /^\d{1,3}(?:[.,]\d{1,4})?$/;
 
-export type SupportedSplitMethod = "INDIVIDUAL" | "EQUAL" | "PERCENTAGE" | "CUSTOM";
+export type SupportedSplitMethod =
+  | "INDIVIDUAL"
+  | "EQUAL"
+  | "PERCENTAGE"
+  | "CUSTOM"
+  | "INCOME_BASED";
 
 export type SplitDetail = {
   memberId: string;
@@ -190,6 +195,78 @@ function buildCustomSplits(
   return { success: true, splits };
 }
 
+function allocateByWeight(
+  total: bigint,
+  entries: Array<{ index: number; weight: bigint }>,
+  totalWeight: bigint,
+) {
+  const allocated = entries.map((entry) => {
+    const rawShare = total * entry.weight;
+    return {
+      ...entry,
+      value: rawShare / totalWeight,
+      remainder: rawShare % totalWeight,
+    };
+  });
+  const allocatedTotal = allocated.reduce((sum, entry) => sum + entry.value, 0n);
+  const remaining = total - allocatedTotal;
+  const priority = [...allocated].sort((left, right) => {
+    if (left.remainder === right.remainder) return left.index - right.index;
+    return left.remainder > right.remainder ? -1 : 1;
+  });
+  const receivesExtra = new Set(
+    priority.slice(0, Number(remaining)).map((entry) => entry.index),
+  );
+
+  return new Map(
+    allocated.map((entry) => [
+      entry.index,
+      entry.value + (receivesExtra.has(entry.index) ? 1n : 0n),
+    ]),
+  );
+}
+
+function buildIncomeBasedSplits(
+  totalCents: bigint,
+  details: SplitDetail[],
+): BuildTransactionSplitsResult {
+  const parsed = details.map((detail, index) => ({
+    ...detail,
+    index,
+    incomeCents: parseMoneyToCents(detail.value),
+  }));
+
+  if (parsed.some((detail) => detail.incomeCents === null)) {
+    return {
+      success: false,
+      message: "Informe uma renda vigente válida para todas as pessoas.",
+    };
+  }
+
+  const totalIncome = parsed.reduce((sum, detail) => sum + detail.incomeCents!, 0n);
+  if (totalIncome === 0n) {
+    return {
+      success: false,
+      message: "A renda total vigente precisa ser maior que zero.",
+    };
+  }
+
+  const weighted = parsed
+    .filter((detail) => detail.incomeCents! > 0n)
+    .map((detail) => ({ index: detail.index, weight: detail.incomeCents! }));
+  const centsByIndex = allocateByWeight(totalCents, weighted, totalIncome);
+  const percentageByIndex = allocateByWeight(FULL_PERCENTAGE, weighted, totalIncome);
+
+  return {
+    success: true,
+    splits: parsed.map((detail) => ({
+      memberId: detail.memberId,
+      cents: centsByIndex.get(detail.index) ?? 0n,
+      percentage: percentageUnitsToDecimal(percentageByIndex.get(detail.index) ?? 0n),
+    })),
+  };
+}
+
 export function buildTransactionSplits({
   method,
   totalCents,
@@ -204,32 +281,40 @@ export function buildTransactionSplits({
     return { success: false, message: "O espaço precisa ter ao menos um membro ativo." };
   }
 
-  if (method === "INDIVIDUAL") {
-    if (!responsibleMemberId || !memberIds.includes(responsibleMemberId)) {
-      return { success: false, message: "Selecione uma pessoa responsável válida." };
-    }
-    return {
-      success: true,
-      splits: [{ memberId: responsibleMemberId, cents: totalCents }],
-    };
-  }
-
-  if (method === "EQUAL") {
-    const splits = splitEqually(totalCents, memberIds);
-    if (splits.some((split) => split.cents === 0n)) {
+  switch (method) {
+    case "INDIVIDUAL":
+      if (!responsibleMemberId || !memberIds.includes(responsibleMemberId)) {
+        return { success: false, message: "Selecione uma pessoa responsável válida." };
+      }
       return {
-        success: false,
-        message: "O valor precisa ter ao menos R$ 0,01 por pessoa na divisão igual.",
+        success: true,
+        splits: [{ memberId: responsibleMemberId, cents: totalCents }],
       };
+    case "EQUAL": {
+      const splits = splitEqually(totalCents, memberIds);
+      if (splits.some((split) => split.cents === 0n)) {
+        return {
+          success: false,
+          message: "O valor precisa ter ao menos R$ 0,01 por pessoa na divisão igual.",
+        };
+      }
+      return { success: true, splits };
     }
-    return { success: true, splits };
+    case "PERCENTAGE":
+    case "CUSTOM":
+    case "INCOME_BASED":
+      if (!validateDetailMembers(details, memberIds)) {
+        return {
+          success: false,
+          message: "A divisão deve incluir cada membro ativo uma única vez.",
+        };
+      }
+      if (method === "PERCENTAGE") return buildPercentageSplits(totalCents, details);
+      if (method === "CUSTOM") return buildCustomSplits(totalCents, details);
+      return buildIncomeBasedSplits(totalCents, details);
+    default: {
+      const unsupportedMethod: never = method;
+      throw new Error(`Método de divisão não suportado: ${unsupportedMethod}`);
+    }
   }
-
-  if (!validateDetailMembers(details, memberIds)) {
-    return { success: false, message: "A divisão deve incluir cada membro ativo uma única vez." };
-  }
-
-  return method === "PERCENTAGE"
-    ? buildPercentageSplits(totalCents, details)
-    : buildCustomSplits(totalCents, details);
 }

@@ -3,11 +3,20 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-import { civilDate, todayInTimezone } from "@/features/finance/dates";
+import {
+  civilDate,
+  civilDateInterval,
+  todayInTimezone,
+} from "@/features/finance/dates";
+import {
+  parseIncomeDetails,
+  resolveIncomeDetails,
+} from "@/features/finance/incomes";
 import { centsToDecimal, parseMoneyToCents } from "@/features/finance/money";
 import {
   accountSchema,
   categorySchema,
+  incomeSettingsSchema,
   transferSchemaForDate,
   transactionSchema,
 } from "@/features/finance/schemas";
@@ -117,6 +126,112 @@ export async function createCategoryAction(
   return { status: "success", message: "Categoria criada com sucesso." };
 }
 
+export async function createIncomeSettingsAction(
+  _previousState: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const context = await requireFinancialContext();
+  if (context.membership.role !== "OWNER") {
+    return {
+      status: "error",
+      message: "Somente o proprietário do espaço pode alterar as rendas de referência.",
+    };
+  }
+
+  const result = incomeSettingsSchema.safeParse(Object.fromEntries(formData));
+  if (!result.success) {
+    return { status: "error", fieldErrors: fieldErrors(result.error) };
+  }
+
+  const details = parseIncomeDetails(result.data.incomeDetails);
+  if (!details) {
+    return {
+      status: "error",
+      fieldErrors: { incomeDetails: ["A configuração de renda enviada é inválida."] },
+    };
+  }
+
+  const activeMembers = await database().spaceMember.findMany({
+    where: { financialSpaceId: context.space.id, revokedAt: null },
+    select: { id: true },
+    orderBy: { createdAt: "asc" },
+  });
+  const activeMemberIds = new Set(activeMembers.map((member) => member.id));
+  const receivedMemberIds = new Set(details.map((detail) => detail.memberId));
+  if (
+    details.length !== activeMembers.length ||
+    receivedMemberIds.size !== details.length ||
+    details.some((detail) => !activeMemberIds.has(detail.memberId))
+  ) {
+    return {
+      status: "error",
+      fieldErrors: {
+        incomeDetails: ["Informe a renda de cada membro ativo uma única vez."],
+      },
+    };
+  }
+
+  const parsedDetails = details.map((detail) => ({
+    memberId: detail.memberId,
+    cents: parseMoneyToCents(detail.value),
+  }));
+  if (parsedDetails.some((detail) => detail.cents === null)) {
+    return {
+      status: "error",
+      fieldErrors: {
+        incomeDetails: ["Informe valores de renda válidos. Use zero para quem não possui renda."],
+      },
+    };
+  }
+  if (parsedDetails.every((detail) => detail.cents === 0n)) {
+    return {
+      status: "error",
+      fieldErrors: { incomeDetails: ["A renda total do espaço precisa ser maior que zero."] },
+    };
+  }
+
+  const effectiveFrom = civilDate(result.data.effectiveFrom);
+  const duplicate = await database().memberIncome.findFirst({
+    where: {
+      financialSpaceId: context.space.id,
+      memberId: { in: activeMembers.map((member) => member.id) },
+      effectiveFrom,
+    },
+    select: { id: true },
+  });
+  if (duplicate) {
+    return {
+      status: "error",
+      fieldErrors: {
+        effectiveFrom: [
+          "Já existe uma configuração nessa data. Escolha uma nova vigência para preservar o histórico.",
+        ],
+      },
+    };
+  }
+
+  try {
+    await database().memberIncome.createMany({
+      data: parsedDetails.map((detail) => ({
+        financialSpaceId: context.space.id,
+        memberId: detail.memberId,
+        amount: centsToDecimal(detail.cents!),
+        effectiveFrom,
+        createdById: context.user.id,
+      })),
+    });
+  } catch {
+    return {
+      status: "error",
+      message: "Não foi possível salvar as rendas. Confira a data de vigência e tente novamente.",
+    };
+  }
+
+  revalidatePath("/app/configuracoes");
+  revalidatePath("/app/movimentacoes/nova");
+  return { status: "success", message: "Nova vigência de renda registrada com sucesso." };
+}
+
 export async function createTransferAction(
   _previousState: FormState,
   formData: FormData,
@@ -199,7 +314,8 @@ export async function createTransactionAction(
   }
 
   const data = result.data;
-  const [account, category, activeMembers] = await Promise.all([
+  const competenceInterval = civilDateInterval(data.competenceDate);
+  const [account, category, eligibleMembers] = await Promise.all([
     database().account.findFirst({
       where: { id: data.accountId, financialSpaceId: context.space.id, deletedAt: null },
       select: { id: true },
@@ -209,8 +325,18 @@ export async function createTransactionAction(
       select: { id: true, type: true },
     }),
     database().spaceMember.findMany({
-      where: { financialSpaceId: context.space.id, revokedAt: null },
-      select: { id: true },
+      where:
+        data.splitMethod === "INCOME_BASED"
+          ? {
+              financialSpaceId: context.space.id,
+              createdAt: { lt: competenceInterval.endExclusive },
+              OR: [
+                { revokedAt: null },
+                { revokedAt: { gt: competenceInterval.start } },
+              ],
+            }
+          : { financialSpaceId: context.space.id, revokedAt: null },
+      select: { id: true, user: { select: { name: true } } },
       orderBy: { createdAt: "asc" },
     }),
   ]);
@@ -225,8 +351,8 @@ export async function createTransactionAction(
     };
   }
 
-  const activeMemberIds = new Set(activeMembers.map((member) => member.id));
-  if (data.payerMemberId && !activeMemberIds.has(data.payerMemberId)) {
+  const eligibleMemberIds = new Set(eligibleMembers.map((member) => member.id));
+  if (data.payerMemberId && !eligibleMemberIds.has(data.payerMemberId)) {
     return { status: "error", fieldErrors: { payerMemberId: ["Pagador inválido."] } };
   }
   const amountCents = parseMoneyToCents(data.amount)!;
@@ -238,12 +364,48 @@ export async function createTransactionAction(
     };
   }
 
+  let authoritativeSplitDetails = splitDetails;
+  if (data.splitMethod === "INCOME_BASED") {
+    const incomeHistory = await database().memberIncome.findMany({
+      where: {
+        financialSpaceId: context.space.id,
+        memberId: { in: eligibleMembers.map((member) => member.id) },
+        effectiveFrom: { lte: competenceInterval.start },
+      },
+      select: { memberId: true, amount: true, effectiveFrom: true },
+      orderBy: [{ effectiveFrom: "desc" }, { createdAt: "desc" }],
+    });
+    const resolved = resolveIncomeDetails({
+      memberIds: eligibleMembers.map((member) => member.id),
+      history: incomeHistory.map((income) => ({
+        memberId: income.memberId,
+        amount: income.amount.toString(),
+        effectiveFrom: income.effectiveFrom.toISOString().slice(0, 10),
+      })),
+      competenceDate: data.competenceDate,
+    });
+
+    if (resolved.missingMemberIds.length > 0) {
+      const missing = eligibleMembers
+        .filter((member) => resolved.missingMemberIds.includes(member.id))
+        .map((member) => member.user.name)
+        .join(", ");
+      return {
+        status: "error",
+        fieldErrors: {
+          splitDetails: [`Cadastre uma renda vigente para: ${missing}.`],
+        },
+      };
+    }
+    authoritativeSplitDetails = resolved.details;
+  }
+
   const splitResult = buildTransactionSplits({
     method: data.splitMethod,
     totalCents: amountCents,
-    memberIds: activeMembers.map((member) => member.id),
+    memberIds: eligibleMembers.map((member) => member.id),
     responsibleMemberId: data.responsibleMemberId,
-    details: splitDetails,
+    details: authoritativeSplitDetails,
   });
 
   if (!splitResult.success) {
@@ -264,7 +426,7 @@ export async function createTransactionAction(
         splitMethod: data.splitMethod,
         description: data.description,
         amount: centsToDecimal(amountCents),
-        competenceDate: civilDate(data.competenceDate),
+        competenceDate: competenceInterval.start,
         dueDate: data.dueDate ? civilDate(data.dueDate) : null,
         paidAt: data.status === "PAID" ? new Date() : null,
         notes: data.notes || null,

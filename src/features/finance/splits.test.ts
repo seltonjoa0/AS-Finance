@@ -9,6 +9,30 @@ import {
 
 const members = ["ana", "bia", "caio"];
 
+function expectClosedIncomeSplit(
+  result: ReturnType<typeof buildTransactionSplits>,
+  totalCents: bigint,
+) {
+  expect(result.success).toBe(true);
+  if (!result.success) {
+    throw new Error(result.message);
+  }
+
+  const allocatedCents = result.splits.reduce(
+    (sum, split) => sum + split.cents,
+    0n,
+  );
+  const allocatedPercentageUnits = result.splits.reduce((sum, split) => {
+    const percentageUnits = parsePercentageUnits(split.percentage ?? "");
+    expect(percentageUnits).not.toBeNull();
+    return sum + (percentageUnits ?? 0n);
+  }, 0n);
+
+  expect(allocatedCents).toBe(totalCents);
+  expect(allocatedPercentageUnits).toBe(1_000_000n);
+  return result.splits;
+}
+
 describe("transaction splits", () => {
   it("gera percentuais iguais que fecham exatamente em 100%", () => {
     const values = equalPercentageInputs(members);
@@ -162,6 +186,136 @@ describe("transaction splits", () => {
       success: false,
       message: "O valor precisa ter ao menos R$ 0,01 por pessoa na divisão igual.",
     });
+  });
+
+  it("divide proporcionalmente à renda e fecha percentuais e centavos", () => {
+    const result = buildTransactionSplits({
+      method: "INCOME_BASED",
+      totalCents: 100_00n,
+      memberIds: ["ana", "bia"],
+      details: [
+        { memberId: "ana", value: "5.000,00" },
+        { memberId: "bia", value: "3.000,00" },
+      ],
+    });
+
+    expect(result).toEqual({
+      success: true,
+      splits: [
+        { memberId: "ana", cents: 6_250n, percentage: "62.5000" },
+        { memberId: "bia", cents: 3_750n, percentage: "37.5000" },
+      ],
+    });
+    expectClosedIncomeSplit(result, 100_00n);
+  });
+
+  it("distribui restos desiguais para rendas na proporção 2:1", () => {
+    const result = buildTransactionSplits({
+      method: "INCOME_BASED",
+      totalCents: 100n,
+      memberIds: ["ana", "bia"],
+      details: [
+        { memberId: "ana", value: "2.000,00" },
+        { memberId: "bia", value: "1.000,00" },
+      ],
+    });
+
+    expect(expectClosedIncomeSplit(result, 100n)).toEqual([
+      { memberId: "ana", cents: 67n, percentage: "66.6667" },
+      { memberId: "bia", cents: 33n, percentage: "33.3333" },
+    ]);
+  });
+
+  it("desempata restos iguais pela ordem estável em uma proporção 1:1:1", () => {
+    const result = buildTransactionSplits({
+      method: "INCOME_BASED",
+      totalCents: 100n,
+      memberIds: members,
+      details: members.map((memberId) => ({ memberId, value: "1.000,00" })),
+    });
+
+    expect(expectClosedIncomeSplit(result, 100n)).toEqual([
+      { memberId: "ana", cents: 34n, percentage: "33.3334" },
+      { memberId: "bia", cents: 33n, percentage: "33.3333" },
+      { memberId: "caio", cents: 33n, percentage: "33.3333" },
+    ]);
+  });
+
+  it("atribui um único centavo ao maior resto entre múltiplos pesos", () => {
+    const result = buildTransactionSplits({
+      method: "INCOME_BASED",
+      totalCents: 1n,
+      memberIds: members,
+      details: [
+        { memberId: "ana", value: "1" },
+        { memberId: "bia", value: "2" },
+        { memberId: "caio", value: "3" },
+      ],
+    });
+
+    expect(expectClosedIncomeSplit(result, 1n)).toEqual([
+      { memberId: "ana", cents: 0n, percentage: "16.6667" },
+      { memberId: "bia", cents: 0n, percentage: "33.3333" },
+      { memberId: "caio", cents: 1n, percentage: "50.0000" },
+    ]);
+  });
+
+  it("preserva renda zero e usa o maior resto com ordem estável", () => {
+    const result = buildTransactionSplits({
+      method: "INCOME_BASED",
+      totalCents: 1n,
+      memberIds: members,
+      details: [
+        { memberId: "ana", value: "1" },
+        { memberId: "bia", value: "1" },
+        { memberId: "caio", value: "0" },
+      ],
+    });
+
+    expect(result).toEqual({
+      success: true,
+      splits: [
+        { memberId: "ana", cents: 1n, percentage: "50.0000" },
+        { memberId: "bia", cents: 0n, percentage: "50.0000" },
+        { memberId: "caio", cents: 0n, percentage: "0.0000" },
+      ],
+    });
+  });
+
+  it("rejeita renda total zerada", () => {
+    expect(
+      buildTransactionSplits({
+        method: "INCOME_BASED",
+        totalCents: 100n,
+        memberIds: ["ana", "bia"],
+        details: [
+          { memberId: "ana", value: "0" },
+          { memberId: "bia", value: "0,00" },
+        ],
+      }),
+    ).toEqual({
+      success: false,
+      message: "A renda total vigente precisa ser maior que zero.",
+    });
+  });
+
+  it("rejeita rendas negativas e formatos monetários inválidos", () => {
+    for (const invalidIncome of ["-1", "-0,01", "abc", "1,234"]) {
+      expect(
+        buildTransactionSplits({
+          method: "INCOME_BASED",
+          totalCents: 100n,
+          memberIds: ["ana", "bia"],
+          details: [
+            { memberId: "ana", value: invalidIncome },
+            { memberId: "bia", value: "1.000,00" },
+          ],
+        }),
+      ).toEqual({
+        success: false,
+        message: "Informe uma renda vigente válida para todas as pessoas.",
+      });
+    }
   });
 
   it("rejeita JSON de divisão fora do contrato", () => {
